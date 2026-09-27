@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, watch } from "node:fs";
-import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
@@ -63,6 +63,8 @@ async function snapshot(repo: string) {
       const path = prefix + entry.name;
       if (path === ".git/objects") continue;
       if (entry.isDirectory()) await walk(join(dir, entry.name), `${path}/`);
+      // Snapshot symlinks themselves: never follow a worktree link outside the repository.
+      else if (entry.isSymbolicLink()) files[path] = `symlink:${await readlink(join(dir, entry.name))}`;
       else files[path] = createHash("sha256").update(await readFile(join(dir, entry.name))).digest("hex");
     }
   }
@@ -112,6 +114,81 @@ test("clean descendant updates both worktree and index; import preserves FETCH_H
   assert.equal((await applyReceivedFastForward(f.input)).status, "up-to-date");
   await absent(f.intentPath); await absent(sentinel);
 });
+
+test("unrelated untracked file and nested log survive fast-forward and same-HEAD retry byte-for-byte", options, async t => {
+  const f = await fixture(t);
+  const contents = Buffer.from([0, 255, 13, 10, 128, 42]);
+  await mkdir(join(f.repository, "logs/nested"), { recursive: true });
+  for (const path of ["local.bin", "logs/nested/run.log"]) await writeFile(join(f.repository, path), contents);
+  assert.equal(await git(f.repository, "ls-files", "--others", "--exclude-standard"), "local.bin\nlogs/nested/run.log\n");
+  assert.equal((await applyReceivedFastForward(f.input)).status, "fast-forwarded");
+  assert.equal((await git(f.repository, "rev-parse", "HEAD")).trim(), f.oid);
+  assert.equal(await git(f.repository, "write-tree"), await git(f.source, "rev-parse", "HEAD^{tree}"));
+  assert.equal(await readFile(join(f.repository, "tracked.txt"), "utf8"), "second\n");
+  assert.equal(await readFile(join(f.repository, "new.txt"), "utf8"), "new committed file\n");
+  for (const path of ["local.bin", "logs/nested/run.log"]) assert.deepEqual(await readFile(join(f.repository, path)), contents);
+  await absent(f.intentPath);
+  const before = await snapshot(f.repository);
+  assert.equal((await applyReceivedFastForward(f.input)).status, "up-to-date");
+  assert.deepEqual(await snapshot(f.repository), before);
+  await absent(f.intentPath);
+});
+
+for (const kind of ["ancestor file/target directory", "directory/target file", "symlink ancestor"] as const) {
+  test(`untracked ${kind} collision blocks without changing HEAD, index or files`, options, async t => {
+    const f = await fixture(t);
+    const outside = join(f.root, "outside");
+    if (kind === "directory/target file") {
+      await mkdir(join(f.repository, "new.txt"));
+      await writeFile(join(f.repository, "new.txt/keep.bin"), Buffer.from([0, 255, 13, 10]));
+    } else {
+      await mkdir(join(f.source, "incoming"));
+      await writeFile(join(f.source, "incoming/added.txt"), "remote addition\n");
+      f.input.oid = await commit(f.source, "third\n"); await f.receive();
+      if (kind === "ancestor file/target directory") await writeFile(join(f.repository, "incoming"), "local ancestor\n");
+      else {
+        await mkdir(outside);
+        await writeFile(join(outside, "keep.bin"), Buffer.from([0, 255, 13, 10]));
+        await symlink(outside, join(f.repository, "incoming"));
+      }
+    }
+    const before = await snapshot(f.repository);
+    const outsideBefore = kind === "symlink ancestor" ? await snapshot(outside) : undefined;
+    assert.equal((await applyReceivedFastForward(f.input)).status, "blocked-dirty");
+    assert.deepEqual(await snapshot(f.repository), before);
+    assert.equal((await git(f.repository, "rev-parse", "HEAD")).trim(), f.first);
+    if (outsideBefore) assert.deepEqual(await snapshot(outside), outsideBefore);
+    await absent(f.intentPath);
+  });
+}
+
+for (const [kind, target, local] of [
+  ["case", "new.txt", "NEW.TXT"],
+  ["Unicode normalization", "caf\u00e9.txt", "cafe\u0301.txt"],
+] as const) {
+  test(`untracked ${kind} alias collision preserves HEAD, index and files`, options, async t => {
+    const f = await fixture(t);
+    await writeFile(join(f.repository, local), "local alias must survive\n");
+    // Probe real filesystem aliasing, not core.ignorecase/core.precomposeunicode.
+    let alias;
+    try { alias = await lstat(join(f.repository, target)); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      t.skip(`Filesystem is ${kind === "case" ? "case-sensitive" : "Unicode-normalization-sensitive"}; names do not collide`);
+      return;
+    }
+    const original = await lstat(join(f.repository, local));
+    assert.equal(alias.dev, original.dev);
+    assert.equal(alias.ino, original.ino);
+    await writeFile(join(f.source, target), "remote alias target\n");
+    f.input.oid = await commit(f.source, "third\n"); await f.receive();
+    const before = await snapshot(f.repository);
+    assert.equal((await applyReceivedFastForward(f.input)).status, "blocked-dirty");
+    assert.deepEqual(await snapshot(f.repository), before);
+    assert.equal((await git(f.repository, "rev-parse", "HEAD")).trim(), f.first);
+    await absent(f.intentPath);
+  });
+}
 
 test("large unrelated ignored build output is not enumerated during clean fast-forward", options, async t => {
   const f = await fixture(t);

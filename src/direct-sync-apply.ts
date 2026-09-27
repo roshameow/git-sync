@@ -122,10 +122,12 @@ async function gate(input: DirectSyncApplyInput, id: Identity, targetPresent: bo
     if ((await git(input.repository, ["ls-tree", "-r", "-z", tree])).split("\0").some(row => row.startsWith("160000 ")))
       return recovery("Submodules are unsupported");
   }
-  if (await git(input.repository, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=none"]))
-    return { status: "blocked-dirty", reason: "Tracked, staged, or untracked changes" };
+  // Preserve unrelated untracked files in place. Only tracked/index changes
+  // block here; the target-path check below separately rejects collisions.
+  if (await git(input.repository, ["status", "--porcelain=v1", "-z", "--untracked-files=no", "--ignore-submodules=none"]))
+    return { status: "blocked-dirty", reason: "Tracked or staged changes" };
   if (targetPresent) {
-    // Non-colliding ignored build output is allowed. Git's no-overwrite-ignore
+    // Non-colliding untracked and ignored files are allowed. Git's no-overwrite-ignore
     // remains the final guard, including filesystem-specific case collisions.
     // Inspect only target additions and their parents. Enumerating every ignored
     // file (e.g. node_modules) can exceed the output bound for an otherwise clean
@@ -143,7 +145,7 @@ async function gate(input: DirectSyncApplyInput, id: Identity, targetPresent: bo
       try {
         const entry = await lstat(join(input.repository, path));
         if (target.has(path) || !entry.isDirectory())
-          return { status: "blocked-dirty", reason: "Ignored file collides with target checkout" };
+          return { status: "blocked-dirty", reason: "Untracked or ignored path collides with target checkout" };
       } catch (error) {
         if (!missing(error) && (error as NodeJS.ErrnoException).code !== "ENOTDIR") throw error;
       }

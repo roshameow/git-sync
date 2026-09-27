@@ -1,6 +1,6 @@
 # git-sync
 
-Explicit, one-way committed-history receipt over SSH, with **opt-in clean-only
+Explicit, one-way committed-history receipt over SSH, with **opt-in safe
 fast-forward** of an existing local checkout. No discovery, push, merge commits,
 conflict resolution, stash, reset, clean, project checks, or service installer.
 This public edition contains only the configurable synchronization core.
@@ -88,10 +88,11 @@ node dist/src/cli.js run
 bare store, retaining immutable refs for previous tips even after peer resets.
 It never changes peer refs or peer files. Default receipt does not inspect or
 transfer uncommitted peer changes. If apply is enabled, the local branch must
-be the configured branch, clean, and a descendant fast-forward must be possible.
-Dirty, divergent, detached/wrong-branch, unsupported, or uncertain states block
-updates. Local-ahead stays local-ahead. Untracked files block; unrelated ignored
-output is allowed, but ignored target collisions block. Hooks are disabled;
+be the configured branch with unchanged tracked files/index, and a descendant
+fast-forward must be possible. Tracked/index modifications, divergence,
+detached/wrong-branch, unsupported, or uncertain states block updates.
+Local-ahead stays local-ahead. Unrelated untracked and ignored files remain
+in place; target file/directory/symlink collisions still block. Hooks are disabled;
 checkout filters, submodules, sparse/shallow histories and hidden index entries
 are not supported by apply. SHA-256 repositories are unsupported.
 
