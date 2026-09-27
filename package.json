@@ -1,0 +1,32 @@
+{
+  "name": "git-sync",
+  "version": "0.1.0-rc.1",
+  "private": true,
+  "description": "Explicit peer committed-history receipt and opt-in clean Git fast-forward",
+  "license": "MIT",
+  "author": "git-sync contributors",
+  "type": "module",
+  "bin": {
+    "git-sync": "dist/src/cli.js"
+  },
+  "engines": {
+    "node": ">=20.10.0"
+  },
+  "files": [
+    "dist/src/*.js",
+    "dist/src/*.d.ts",
+    "config.example.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && chmod +x dist/src/cli.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test --test-concurrency=2 dist/test/*.test.js",
+    "start": "node dist/src/cli.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  }
+}
