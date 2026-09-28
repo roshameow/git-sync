@@ -18,3 +18,4 @@ dist/
 *.log
 __pycache__/
 /.test-build/
+/skills/github-public-release/

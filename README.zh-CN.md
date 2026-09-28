@@ -258,7 +258,6 @@ CLI="$SOURCE/dist/src/cli.js"
 | 安全检查、状态含义与中断恢复 | [安全与恢复](docs/safety.md) |
 | 可选的 Pi 观察与显式提交来源记录 | [来源记录](docs/provenance.md) |
 | 从旧版纯核心版本迁移 | [迁移指南](docs/migration.md) |
-| 开源时保护私人文档与配置 | [GitHub 公开发布 skill](skills/github-public-release/SKILL.md) |
 
 v0.1 纯核心版本的配置**不能直接套用**到当前工作流。迁移前请保留原状态和恢复证据。特殊 checkout 配置及传输限制——包括不支持的过滤器、子模块、浅克隆 / 稀疏布局、SHA-256 仓库——请查看配置与安全指南。
 

@@ -15,7 +15,7 @@ test("private local documentation/config patterns are ignored, public guidance r
   await execute("/usr/bin/git", ["-C", directory, "init", "--quiet", "--template="]);
   await writeFile(join(directory, ".gitignore"), await readFile(join(root, ".gitignore")));
   const privatePaths = ["private/notes.md", "docs/private/notes.md", "docs/local/notes.md", "docs/device.local.md",
-    "docs/deployment-local.md", "config.local.json", "workflow.local.json", ".env", ".env.local", "state/receipt.json"];
+    "docs/deployment-local.md", "config.local.json", "workflow.local.json", ".env", ".env.local", "state/receipt.json", "skills/github-public-release/SKILL.md"];
   for (const file of privatePaths) { await mkdir(dirname(join(directory, file)), { recursive: true }); await writeFile(join(directory, file), "fixture\n"); }
   const checked = (await execute("/usr/bin/git", ["-C", directory, "check-ignore", "--no-index", ...privatePaths])).stdout.trim().split("\n");
   assert.deepEqual(checked, privatePaths);
@@ -27,7 +27,9 @@ test("private local documentation/config patterns are ignored, public guidance r
 test("package exports only named public docs/examples and does not keep the retired controller", async () => {
   const p = JSON.parse(await readFile(join(root, "package.json"), "utf8")) as { files: string[]; pi: { extensions: string[]; skills: string[] } };
   assert.ok(p.files.includes("extensions/provenance.ts"));
-  assert.ok(p.files.includes("skills/github-public-release/SKILL.md"));
+  assert.ok(p.files.every(file => !file.startsWith("skills/")), "user-level skills are not product assets");
+  assert.deepEqual(p.pi.skills, [], "installing this package must not load a global publishing skill");
+  await assert.rejects(readFile(join(root, "skills/github-public-release/SKILL.md")), { code: "ENOENT" });
   assert.deepEqual(p.pi.extensions, ["./extensions/provenance.ts"]);
   assert.ok(p.files.some(file => file === "docs/guardian-agent.md"));
   assert.ok(p.files.filter(file => /^(docs|examples)\//.test(file)).every(file => !/[\*?]/.test(file)));

@@ -16,8 +16,6 @@
     "dist/src/*.js",
     "dist/src/*.d.ts",
     "extensions/provenance.ts",
-    "skills/github-public-release/SKILL.md",
-    "skills/github-public-release/references/release-checklist.md",
     "README.md",
     "README.zh-CN.md",
     "LICENSE",
@@ -50,9 +48,7 @@
     "extensions": [
       "./extensions/provenance.ts"
     ],
-    "skills": [
-      "./skills"
-    ]
+    "skills": []
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"

@@ -258,7 +258,6 @@ Check the **apply result**, not only whether a commit was received. `up-to-date`
 | Safety gates, status meanings, and interrupted operations | [Safety & recovery](docs/safety.md) |
 | Optional Pi observations and explicit commit attribution | [Provenance](docs/provenance.md) |
 | Moving from the older core-only release | [Migration](docs/migration.md) |
-| Keeping personal docs/config out of an open-source release | [GitHub publication skill](skills/github-public-release/SKILL.md) |
 
 The v0.1 core configuration is **not automatically compatible** with this workflow. Preserve its state and recovery evidence before migrating. Supported layout and transport restrictions—including unsupported checkout filters, submodules, shallow/sparse layouts, and SHA-256 repositories—are explained in the setup and safety guides.
 
