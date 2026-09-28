@@ -15,10 +15,20 @@ Keep existing Git projects up to date **between two computers**, or **from GitHu
 
 ## Why use it?
 
-- **Switch computers without repeating the same Git checks.** Each configured computer can receive the other's committed work and apply eligible updates.
-- **Pick up work committed on GitHub.** Changes from a teammate, ChatGPT, or another coding tool are normal input; the project does not need to exist on a second computer.
-- **Keep human judgment available.** Open the Guardian session to see what it found, discuss a conflict, or decide how to preserve local changes.
-- **Keep normal work quiet.** Successful background sync does not need an AI model. The Guardian is notified about problems that need attention, not every successful commit.
+**Many coding contexts. One shared toolchain.**
+
+Vibe coding makes it easy to improve your tools while using them. One conversation fixes a helper script. Another agent extends a CLI. An IDE assistant or a cloud coding task updates the same repository. These changes happen in separate contexts, but they all contribute to the tools you rely on every day.
+
+The friction comes afterward: a useful fix stays on one computer, another session starts from an older checkout, or you end up solving the same problem twice. As coding spreads across terminals, IDEs, browsers, and agents, keeping that shared code up to date becomes a chore of its own.
+
+**git-sync helps those improvements travel beyond the context that produced them.** Once changes are committed, it can receive them from your other computer or GitHub and apply explicitly enabled, safe fast-forwards. When histories diverge, it pauses automatic application; the optional Guardian can help investigate and work through a resolution.
+
+- **Carry improvements into your next session.** Keep configured checkouts up to date so the next task can start with the fixes you have already made, rather than rediscovering them.
+- **Use different coding tools on the same project.** Commits from terminal agents, IDE assistants, ChatGPT, teammates, or manual edits follow the same Git workflow. The tool that created them does not need a special integration.
+- **Spend less time moving code between environments.** Receive committed work from a peer computer or GitHub without repeating the same fetch-and-check routine.
+- **Keep judgment where it matters.** Routine updates stay quiet and need no model calls. For problems that need attention, open Guardian to inspect the findings, discuss a conflict, or decide what to do next.
+
+Each agent keeps its own context; Git provides the shared history. git-sync synchronizes committed code—not conversation history or simultaneous edits by agents sharing one working directory.
 
 You choose which projects and branches to manage, and when updates may be applied. Configuration and sync records stay on your own computers.
 
