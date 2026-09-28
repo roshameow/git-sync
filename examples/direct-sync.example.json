@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "hostId": "host-a",
+  "peerHostId": "host-b",
+  "applyCleanFastForward": false,
+  "intervalSeconds": 60,
+  "repositories": [
+    {
+      "canonicalRemote": "REPLACE_WITH_CANONICAL_REMOTE",
+      "localPath": "/REPLACE_WITH_LOCAL_CHECKOUT",
+      "peerPath": "/REPLACE_WITH_PEER_CHECKOUT",
+      "branch": "REPLACE_WITH_BRANCH",
+      "enabled": true
+    }
+  ]
+}

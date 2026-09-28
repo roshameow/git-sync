@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstat, mkdir, readFile, realpath } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, normalize, resolve } from "node:path";
 
 /** Standard-Git committed-history transfer. Never writes the source, checks out
  * files, invokes project checks, pushes, or uses the legacy publication journals.
@@ -12,6 +12,10 @@ export interface DirectSyncInput {
   readonly source: string;
   readonly branch: string;
   readonly sshCommand?: string;
+  /** Fixed GitHub HTTPS transport; credentials remain in the existing gh login. */
+  readonly githubHttps?: boolean;
+  /** Absolute normalized executable path; invoked with fixed auth git-credential arguments. */
+  readonly githubCli?: string;
   readonly timeoutMs?: number;
   readonly signal?: AbortSignal;
 }
@@ -27,8 +31,15 @@ const GIT = "/usr/bin/git";
 const OID = /^[0-9a-f]{40}$/;
 
 export async function directGit(cwd: string, args: readonly string[], options: {
-  sshCommand?: string; timeoutMs?: number; signal?: AbortSignal;
+  sshCommand?: string; githubHttps?: boolean; githubCli?: string; timeoutMs?: number; signal?: AbortSignal;
 } = {}): Promise<string> {
+  const githubCli = options.githubCli ?? "/usr/bin/gh";
+  if (!isAbsolute(githubCli) || githubCli.length <= 1 || githubCli.length > 4096 ||
+      normalize(githubCli) !== githubCli || githubCli.endsWith("/") || /[\x00-\x1f\x7f]/.test(githubCli)) {
+    throw new Error("GitHub CLI must be an absolute normalized safe path");
+  }
+  const quotedGithubCli = "'" + githubCli.replace(/'/g, "'\"'\"'") + "'";
+  if (options.githubHttps && options.sshCommand) throw new Error("Ambiguous Git transport");
   if (options.signal?.aborted) throw new Error("Direct sync cancelled");
   const timeout = options.timeoutMs ?? 120_000;
   if (!Number.isInteger(timeout) || timeout < 1 || timeout > 300_000) throw new Error("Invalid Git deadline");
@@ -42,7 +53,10 @@ export async function directGit(cwd: string, args: readonly string[], options: {
   return new Promise((accept, reject) => {
     const child = spawn(GIT, ["-C", cwd, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
       "-c", "maintenance.auto=false", "-c", "gc.auto=0", "-c", "protocol.allow=never",
-      "-c", `protocol.${options.sshCommand ? "ssh" : "file"}.allow=always`, ...args],
+      "-c", `protocol.${options.githubHttps ? "https" : options.sshCommand ? "ssh" : "file"}.allow=always`,
+      ...(options.githubHttps ? ["-c", "http.sslVerify=true", "-c", "http.followRedirects=false",
+        "-c", "credential.helper=", "-c", `credential.https://github.com.helper=!${quotedGithubCli} auth git-credential`] : []),
+      ...args],
     { env, cwd: "/", detached: true, stdio: ["ignore", "pipe", "pipe"] });
     let finished = false, size = 0;
     let failure: Error | undefined;
@@ -91,6 +105,10 @@ async function privateDirectory(path: string): Promise<void> {
 export async function receiveCommittedBranch(input: DirectSyncInput): Promise<DirectSyncResult> {
   if (resolve(input.store) !== input.store || !input.branch || input.branch.startsWith("-") ||
     !input.source || input.source.startsWith("-") || /[\r\n\0]/.test(input.source)) throw new Error("Invalid direct sync input");
+  if (input.githubHttps) {
+    const match = /^https:\/\/github\.com\/[A-Za-z0-9][A-Za-z0-9-]*\/([A-Za-z0-9_.-]+)\.git$/.exec(input.source);
+    if (!match || [".", ".."].includes(match[1]!) || input.sshCommand) throw new Error("Invalid GitHub HTTPS source");
+  }
   await privateDirectory(resolve(input.store, ".."));
   await directGit("/", ["check-ref-format", `refs/heads/${input.branch}`], input);
   try { await mkdir(input.store, { mode: 0o700 }); }
@@ -121,6 +139,7 @@ export async function receiveCommittedBranch(input: DirectSyncInput): Promise<Di
   if ((await directGit(input.store, ["rev-parse", "--is-bare-repository"], input)).trim() !== "true" ||
     (await directGit(input.store, ["rev-parse", "--show-object-format"], input)).trim() !== "sha1")
     throw new Error("Direct sync store must be bare SHA-1");
+  if (input.githubHttps) await verifyGitHubStoreConfig(input.store);
   const ref = `refs/heads/${input.branch}`;
   const listing = (await directGit(input.store, ["ls-remote", "--refs", input.source, ref], input)).trim();
   const rows = listing ? listing.split("\n") : [];
@@ -135,6 +154,7 @@ export async function receiveCommittedBranch(input: DirectSyncInput): Promise<Di
     // Fetch the observed OID, not a branch that may move during transfer. No
     // FETCH_HEAD or remote-tracking ref update; publish the local ref only once
     // object verification succeeds. Source history is left entirely unchanged.
+    if (input.githubHttps) await verifyGitHubStoreConfig(input.store);
     await directGit(input.store, ["-c", "fetch.fsckObjects=true", "fetch", "--quiet", "--no-tags",
       "--no-write-fetch-head", "--no-recurse-submodules", "--no-auto-maintenance", input.source, oid], input);
   }
@@ -149,4 +169,28 @@ export async function receiveCommittedBranch(input: DirectSyncInput): Promise<Di
   if ((await directGit(input.store, ["rev-parse", "--verify", receivedRef], input)).trim() !== oid) throw new Error("Received tip readback failed");
   return { branch: input.branch, oid, receivedRef, changed: !existing,
     completedAt: new Date().toISOString(), worktreeUpdated: false };
+}
+
+/** An owned marker is not permission to execute an altered store config. URL
+ * rewrites and URL-scoped HTTP settings can override generic command flags.
+ * Parse only the bounded store file, without includes or repository discovery. */
+async function verifyGitHubStoreConfig(store: string): Promise<void> {
+  const file = join(store, "config"), st = await lstat(file);
+  if (!st.isFile() || st.isSymbolicLink() || st.nlink !== 1 || st.uid !== process.getuid?.() ||
+      (st.mode & 0o022) !== 0 || st.size > 16_384) throw new Error("Unsafe GitHub transport store configuration");
+  const entries = (await directGit("/", ["config", "--file", file, "--no-includes", "--null", "--list"], { timeoutMs: 5000 })).split("\0");
+  if (entries.pop() !== "") throw new Error("Invalid GitHub transport store configuration");
+  const allowed: Record<string, readonly string[]> = {
+    "core.repositoryformatversion": ["0", "1"], "core.bare": ["true"], "core.filemode": ["true", "false"],
+    "core.ignorecase": ["true", "false"], "core.precomposeunicode": ["true", "false"], "extensions.objectformat": ["sha1"],
+  };
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    const split = entry.indexOf("\n"), key = entry.slice(0, split).toLowerCase(), value = entry.slice(split + 1).toLowerCase();
+    if (split < 0 || seen.has(key) || !Object.hasOwn(allowed, key) || !allowed[key]!.includes(value))
+      throw new Error("Unexpected GitHub transport store configuration; preserve for inspection");
+    seen.add(key);
+  }
+  if (!seen.has("core.repositoryformatversion") || !seen.has("core.bare"))
+    throw new Error("Incomplete GitHub transport store configuration");
 }

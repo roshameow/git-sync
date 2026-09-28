@@ -2,10 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Stats } from "node:fs";
 import { lstat, mkdir, open, readFile, realpath, rm, type FileHandle } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
-// Curated leaf helper from storage.ts; no storage framework is included.
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && "code" in error;
-}
+import { isNodeError } from "./storage.js";
 
 export interface OwnedLocalLock {
   readonly handle: FileHandle;

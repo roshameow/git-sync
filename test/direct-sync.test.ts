@@ -6,6 +6,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { promisify } from "node:util";
+import { createConfig, resolveAppPaths } from "../src/config.js";
+import { discoverRepositories } from "../src/discovery.js";
+import { createHostIdentity, saveHostIdentity } from "../src/host.js";
+import { saveInventory } from "../src/inventory.js";
+import { createEmptyRegistry, saveRegistry, setRepositoryMode } from "../src/registry.js";
+import { writeJsonAtomic } from "../src/storage.js";
+import { __runUpstreamSyncOnceForTests } from "../src/upstream-sync-service.js";
 import { directGit, receiveCommittedBranch } from "../src/direct-sync.js";
 
 const execFileAsync = promisify(execFile);
@@ -240,4 +247,85 @@ test("refuses to adopt an existing worktree or nonempty directory without changi
   await assert.rejects(receiveCommittedBranch({ ...input, store: directory }), /Refuse to adopt existing repository/);
   assert.deepEqual(await readdir(directory), ["keep.bin"]);
   assert.deepEqual(await readFile(join(directory, "keep.bin")), bytes);
+});
+
+test("GitHub helper uses an absolute quoted executable and fixed arguments without weakening HTTPS flags", testOptions, async context => {
+  const { root } = await fixture(context);
+  const githubCli = join(root, "gh tool's $(touch injected);#");
+  await writeFile(githubCli, '#!/bin/sh\nprintf "%s\\n" "$@"\n', { mode: 0o700 });
+  const options = { githubHttps: true, githubCli, ...deadline };
+  const helper = (await directGit(root, ["config", "--get", "credential.https://github.com.helper"], options)).trim();
+  const quoted = "'" + githubCli.replace(/'/g, "'\"'\"'") + "'";
+  assert.equal(helper, `!${quoted} auth git-credential`);
+  // Exercise exactly the shell snippet Git receives, without contacting GitHub.
+  const result = await execFileAsync("/bin/sh", ["-c", `${helper.slice(1)} get`], {
+    cwd: root, env: { PATH: "/usr/bin:/bin", HOME: root }, timeout: 5000,
+  });
+  assert.equal(result.stdout, "auth\ngit-credential\nget\n");
+  await assert.rejects(stat(join(root, "injected")), { code: "ENOENT" });
+  assert.equal((await directGit(root, ["config", "--get", "credential.https://github.com.helper"],
+    { githubHttps: true, ...deadline })).trim(), "!'/usr/bin/gh' auth git-credential");
+  for (const [key, value] of [["http.sslVerify", "true"], ["http.followRedirects", "false"],
+    ["protocol.allow", "never"], ["protocol.https.allow", "always"], ["credential.helper", ""]]) {
+    assert.equal((await directGit(root, ["config", "--get", key!], options)).trim(), value);
+  }
+  for (const invalid of ["gh", "", "/", "/tmp/../gh", "/tmp//gh", "/tmp/gh/", "/tmp/gh\n", "/tmp/gh\0", "/tmp/gh\x7f"]) {
+    await assert.rejects(directGit(root, ["--version"], { githubHttps: true, githubCli: invalid }), /absolute normalized safe path/);
+  }
+  await assert.rejects(directGit(root, ["--version"], { ...options, sshCommand: "/usr/bin/ssh" }), /Ambiguous/);
+});
+
+test("GitHub URL and store allowlist reject altered endpoints and transport settings before network", testOptions, async context => {
+  const { store, input } = await fixture(context);
+  await receiveCommittedBranch(input);
+  for (const source of ["http://github.com/example/project.git", "https://example.invalid/example/project.git",
+    "https://user@github.com/example/project.git", "https://github.com:443/example/project.git",
+    "https://github.com/example/project.git?query", "https://github.com/example/project.git/redirect"])
+    await assert.rejects(receiveCommittedBranch({ ...input, source, githubHttps: true }), /Invalid GitHub HTTPS source/);
+  const config = await readFile(join(store, "config"));
+  for (const setting of ['\n[http "https://github.com"]\n sslVerify = false\n',
+    '\n[url "https://example.invalid/"]\n insteadOf = https://github.com/\n',
+    '\n[credential]\n helper = !false\n', '\n[include]\n path = /fixture/config\n']) {
+    await writeFile(join(store, "config"), Buffer.concat([config, Buffer.from(setting)]));
+    await assert.rejects(receiveCommittedBranch({ ...input, source: "https://github.com/example/project.git", githubHttps: true }),
+      /Unexpected GitHub transport store configuration/);
+  }
+});
+
+
+test("upstream service forwards workflow GitHub CLI, uses the portable default and rejects unsafe overrides", testOptions, async context => {
+  const { root, source, first } = await fixture(context);
+  const paths = resolveAppPaths({ GIT_SYNC_HOME: join(root, "upstream-app") });
+  const identity = createHostIdentity("host-a"), remote = "github.com/example/project";
+  await git(source, "remote", "add", "origin", `https://${remote}.git`);
+  await saveHostIdentity(paths, identity);
+  await saveInventory(paths, await discoverRepositories(createConfig([source], []), identity));
+  await saveRegistry(paths, setRepositoryMode(createEmptyRegistry(), remote, "enabled"));
+  await writeJsonAtomic(join(paths.stateDirectory, "upstream-sync.json"), {
+    schemaVersion: 1, hostId: identity.id, intervalSeconds: 30,
+    repositories: [{ canonicalRemote: remote, branch, enabled: true, applyCleanFastForward: false }],
+  });
+  const workflowFile = join(root, "upstream-app", "workflow.json");
+  const workflow = (githubCli: string) => ({ schemaVersion: 1, primaryHostId: identity.id, peers: {}, executables: { githubCli } });
+  const calls: string[] = [];
+  const adapter = { TEST_ONLY: true as const, receive: async (input: Parameters<typeof receiveCommittedBranch>[0]) => {
+    assert.equal(input.githubHttps, true);
+    assert.equal(input.source, `https://${remote}.git`);
+    calls.push(input.githubCli!);
+    // Only the network boundary is substituted: receipt and state gates remain real.
+    return receiveCommittedBranch({ ...input, githubHttps: false, source });
+  } };
+  const selected = join(root, "gh executable's path");
+  await writeJsonAtomic(workflowFile, workflow(selected));
+  const result = await __runUpstreamSyncOnceForTests(paths, adapter);
+  assert.equal(result?.repositories[0]?.received?.oid, first);
+  assert.equal(result?.repositories[0]?.apply.state, "not-requested");
+  assert.deepEqual(calls, [selected]);
+  await rm(workflowFile);
+  await __runUpstreamSyncOnceForTests(paths, adapter);
+  assert.deepEqual(calls, [selected, "/usr/bin/gh"]);
+  await writeJsonAtomic(workflowFile, workflow("relative-gh"));
+  const invalid = await __runUpstreamSyncOnceForTests(paths, adapter);
+  assert.equal(invalid?.repositories[0]?.transfer.state, "error");
+  assert.equal(calls.length, 2);
 });

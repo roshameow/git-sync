@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "primaryHostId": "host-a",
+  "peers": {},
+  "executables": {
+    "githubCli": "/REPLACE_WITH_LOCAL_GH_EXECUTABLE",
+    "python": "/REPLACE_WITH_LOCAL_PYTHON3_EXECUTABLE"
+  }
+}

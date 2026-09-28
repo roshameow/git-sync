@@ -1,8 +1,8 @@
 {
   "name": "git-sync",
-  "version": "0.1.0-rc.2",
+  "version": "0.2.0",
   "private": true,
-  "description": "Explicit peer committed-history receipt and opt-in clean Git fast-forward",
+  "description": "Explicit peer and GitHub upstream synchronization with a normal interactive Pi Guardian workflow",
   "license": "MIT",
   "author": "git-sync contributors",
   "type": "module",
@@ -15,12 +15,23 @@
   "files": [
     "dist/src/*.js",
     "dist/src/*.d.ts",
-    "config.example.json",
+    "extensions/provenance.ts",
+    "skills/github-public-release/SKILL.md",
+    "skills/github-public-release/references/release-checklist.md",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "docs/setup.md",
+    "docs/guardian.md",
+    "docs/guardian-agent.md",
+    "docs/safety.md",
+    "docs/provenance.md",
+    "docs/migration.md",
+    "examples/workflow.example.json",
+    "examples/workflow.single-host.example.json",
+    "examples/direct-sync.example.json"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json && chmod +x dist/src/cli.js",
+    "build": "node scripts/clean-build.mjs && tsc -p tsconfig.json && chmod +x dist/src/cli.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test --test-concurrency=2 dist/test/*.test.js",
     "start": "node dist/src/cli.js"
@@ -28,5 +39,26 @@
   "devDependencies": {
     "@types/node": "^22.10.0",
     "typescript": "^5.7.2"
+  },
+  "keywords": [
+    "pi-package",
+    "git",
+    "sync"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/provenance.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
   }
 }
