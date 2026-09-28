@@ -1,88 +1,247 @@
 # git-sync
 
-Explicit committed-history synchronization, safe opt-in fast-forward, and an
-ordinary interactive Pi Guardian for problems that need investigation.
+**Routine Git updates in the background. A real Pi session for the hard parts.**
 
-This repository contains the active workflow, not just a transfer library:
-discovery and explicit enrollment, GitHub upstream or direct-peer receipt,
-background observation, incident routing, isolated merge preview, and optional
-session provenance. Runtime identities, credentials, checkouts, and operational
-records belong outside this source tree.
+**English** · [简体中文](README.zh-CN.md)
 
-```text
-existing owner checkout ← safe fast-forward ← private committed-history store
-                                                   ↑                 ↑
-                                           GitHub HTTPS       pinned SSH peer
-                                                   │                 │
-                              daemon → status / incidents → Pi Guardian
-                                                       public notify + durable
-                                                       ordinary tools / Desktop
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Node.js](https://img.shields.io/badge/Node.js-22.19%2B_for_Pi-339933?logo=nodedotjs&logoColor=white)](#requirements)
+
+Keep existing Git projects up to date **between two computers**, or **from GitHub to one computer**. Straightforward updates can run automatically. When progress is blocked, an optional **Guardian**—an ordinary, interactive [Pi](https://github.com/earendil-works/pi) coding-assistant session—can investigate and coordinate the next step.
+
+> git-sync moves **commits**: versions you have already saved in Git. It is not live folder mirroring, a backup system, or a way to copy unfinished edits between computers.
+
+[Choose a mode](#choose-a-mode) · [Architecture](#how-it-fits-together) · [Get started](#get-started) · [Guardian](#when-sync-needs-help) · [Safety](#what-happens-to-my-local-work) · [Documentation](#documentation)
+
+## Why use it?
+
+- **Switch computers without repeating the same Git checks.** Each configured computer can receive the other's committed work and apply eligible updates.
+- **Pick up work committed on GitHub.** Changes from a teammate, ChatGPT, or another coding tool are normal input; the project does not need to exist on a second computer.
+- **Keep human judgment available.** Open the Guardian session to see what it found, discuss a conflict, or decide how to preserve local changes.
+- **Keep normal work quiet.** Successful background sync does not need an AI model. The Guardian is notified about problems that need attention, not every successful commit.
+
+You choose the repositories, branches, computers, and permissions. No separate cloud coordination service or private control repository is required.
+
+## Choose a mode
+
+| Your situation | Mode | What happens |
+| --- | --- | --- |
+| The same project already exists on two computers | **Peer sync** | Each computer pulls the selected branch from the other over verified SSH. |
+| A project exists on one computer and receives updates on GitHub | **GitHub upstream sync** | That computer pulls its selected GitHub branch over HTTPS. No second checkout is needed. |
+| You want one place to investigate problems across both computers | **Central Guardian** | Choose a primary computer for the Pi session. It can monitor the peer's upstream projects without keeping local copies. |
+
+**Choose one sync source per repository:** peer or GitHub upstream. Different repositories can use different modes. Each installation supports at most one peer; this is not a multi-host replication cluster.
+
+Syncing from a peer or GitHub does **not** automatically push your local commits to GitHub.
+
+## How it fits together
+
+The workflow separates three jobs: **receive committed history**, **check whether an update is safe**, and **ask an assistant for help when needed**.
+
+```mermaid
+flowchart TB
+    GH["GitHub<br/>Selected branches"]
+
+    subgraph A["Computer A · chosen primary"]
+        direction TB
+        SA["Background sync service<br/>Receive commits · check · record status"]
+        RA["Existing working repositories"]
+        GA["Guardian<br/>Ordinary interactive Pi session"]
+        SA -->|"Eligible fast-forward"| RA
+        SA -.->|"Issues that need attention"| GA
+    end
+
+    subgraph B["Computer B · optional peer"]
+        direction TB
+        SB["Background sync service<br/>Receive commits · check · record status"]
+        RB["Existing working repositories"]
+        SB -->|"Eligible fast-forward"| RB
+    end
+
+    GH -->|"Upstream mode · HTTPS"| SA
+    GH -->|"Upstream mode · HTTPS"| SB
+    RA -->|"Peer mode · B pulls over SSH"| SB
+    RB -->|"Peer mode · A pulls over SSH"| SA
+    SB -.->|"A queries cached upstream status"| SA
+
+    classDef source fill:#f1f5f9,stroke:#64748b,color:#0f172a
+    classDef service fill:#dbeafe,stroke:#2563eb,color:#172554
+    classDef workspace fill:#dcfce7,stroke:#16a34a,color:#14532d
+    classDef assistant fill:#ede9fe,stroke:#7c3aed,color:#3b0764
+    class GH source
+    class SA,SB service
+    class RA,RB workspace
+    class GA assistant
 ```
 
-- **One host:** receive a selected GitHub branch into an existing checkout. No
-  peer or second copy is required.
-- **Two hosts:** each explicitly receives the other's selected branch. IDs and
-  paths are configuration, not built-in device names. Each host supports zero
-  or one workflow peer.
-- **Central Guardian:** the primary host can monitor a peer's upstream status
-  even without that repository locally or any local sync enrollment.
-- **No automatic conflict resolution:** routine work uses no model. Divergence
-  needs a resolver using ordinary tools in an isolated worktree, appropriate
-  project checks, and any required user decision.
+**Read this as a map of supported arrangements, not simultaneous routes for one repository.** Solid arrows carry committed history or apply an eligible update; dashed arrows carry status and notifications. An upstream-only project needs a checkout only on its owner computer. A monitor-only primary needs no business checkout at all.
 
-## Start here
+The primary is the computer you choose to host the Guardian—not a required device model or a central Git server. Both computers make their own local update decisions under their configured permissions.
 
-1. [Install, initialize, discover, and select a sync mode](docs/setup.md).
-2. [Start the daemon and connect an ordinary Pi Guardian](docs/guardian.md).
-3. Use the [Guardian AGENTS.md template](docs/guardian-agent.md).
-4. Read [safety and recovery](docs/safety.md),
-   [optional provenance](docs/provenance.md), and
-   [migration / private-data boundaries](docs/migration.md).
+### What counts as an automatic update?
 
-Requirements: Node.js **20.10+** for git-sync, `/usr/bin/git`, and POSIX filesystem
-semantics. Direct-peer transport uses `/usr/bin/ssh`. GitHub upstream needs your
-own authenticated GitHub CLI; Guardian routing needs Python **3.9+**. The complete
-Pi setup needs the dependencies' newer Node/Pi requirements (use Node **22.19+**
-and a current Pi). Native Windows is not supported. LaunchAgent installation is
-**macOS only**; other POSIX hosts use foreground `daemon run` or their own
-supervisor, not launchd.
+1. **Discover and select.** Find existing repositories in the directories you choose. Finding a repository does not automatically enable it.
+2. **Receive first.** Fetch a specific commit into a separate local history store, without immediately changing your working files.
+3. **Check before applying.** Verify the branch, local changes, repository identity, and relationship between the commits.
+4. **Update or pause.** If explicitly allowed and all checks pass, perform a **fast-forward**: move to a newer commit that already contains your local history, without creating a merge commit or rewriting history. Otherwise, preserve the work and report the state.
 
-From a checkout of this public repository:
+**“Received” is not the same as “applied.”** A commit may be downloaded while your checkout remains unchanged—for example, because it is already current or because an update is blocked.
+
+## When sync needs help
+
+The Guardian is a normal Pi coding session, not a model hidden inside the daemon. You can interact with it directly and, optionally, open the same session in [pi-session-viewer](https://github.com/roshameow/pi-session-viewer).
+
+It uses the existing [pi-agent-notify](https://github.com/roshameow/pi-agent-notify) and [pi-subagent-durable](https://github.com/roshameow/pi-subagent-durable) integrations. There is no dedicated Guardian extension or special tool whitelist.
+
+```mermaid
+flowchart TB
+    RECEIVE["New committed history"] --> CHECK["Background Git checks"]
+    CHECK -->|"Already current, or safe update"| QUIET["Record result<br/>Normal success stays quiet"]
+    CHECK -->|"Needs attention"| ISSUE["Record and deduplicate the issue"]
+    ISSUE -->|"Existing notification channel"| GUARD["Guardian checks current facts"]
+
+    subgraph ASSIST["Assistant-directed work · ordinary Pi tools"]
+        GUARD --> KIND{"What is blocking progress?"}
+        KIND -->|"Connection, settings, or local edits"| PLAN["Investigate and explain<br/>Preserve local work"]
+        KIND -->|"Histories have diverged"| RESOLVE["Separate resolver task<br/>Isolated working copy"]
+        RESOLVE --> TEST["Candidate result<br/>Review changes and run project checks"]
+        TEST --> REVIEW["Guardian review<br/>User decision when required"]
+        PLAN --> REVIEW
+        REVIEW --> VERIFY["Recheck inputs and permission<br/>Coordinate action and verify the result"]
+    end
+
+    EVIDENCE["Optional commit-source evidence"] -.-> GUARD
+
+    classDef routine fill:#dbeafe,stroke:#2563eb,color:#172554
+    classDef success fill:#dcfce7,stroke:#16a34a,color:#14532d
+    classDef attention fill:#fef3c7,stroke:#d97706,color:#78350f
+    classDef assistant fill:#ede9fe,stroke:#7c3aed,color:#3b0764
+    class RECEIVE,CHECK routine
+    class QUIET,VERIFY success
+    class ISSUE,KIND attention
+    class GUARD,PLAN,RESOLVE,TEST,REVIEW,EVIDENCE assistant
+```
+
+The lower section describes **work the Guardian can organize**, not an unattended semantic-merge engine. Simply starting the daemon does not launch a model or automatically resolve conflicts. Connect the Guardian separately; it acts within the user's instructions and obtains decisions when the existing permission is insufficient.
+
+- Divergence and recovery-required states are raised promptly; repeated failures and selected persistent blockers are reported after repeated completed passes.
+- The optional bundled provenance bridge records Pi session observations. The Guardian can use reliable evidence to contact an original development session when appropriate. **An observed commit is not proof of authorship**; unknown or manual sources remain valid sync input.
+- The built-in isolated merge preview is currently **peer-mode only**. A preview is neither project-test success nor permission to apply it.
+
+[Connect the Guardian →](docs/guardian.md) · [Guardian instruction template →](docs/guardian-agent.md) · [How provenance works →](docs/provenance.md)
+
+## What happens to my local work?
+
+| Situation | Background behavior |
+| --- | --- |
+| The selected branch is already current | Leave the checkout as it is. |
+| A fast-forward is possible and tracked files / staging area are unchanged | Apply it **only if automatic updates were enabled**. |
+| Unrelated untracked or ignored files exist | Leave them in place; they do not automatically block the update. |
+| A target path would overwrite or collide with local content | Block the update and preserve that content. |
+| Tracked files or the staging area contain changes | Block automatic application; do not silently move or stash the work. |
+| Both histories have new, different commits | Stop the fast-forward path and involve the Guardian / resolver workflow. |
+| Local committed history is ahead | Do not roll it back or auto-push it. In peer mode, check the other computer's progress when needed. |
+| An operation was interrupted or its outcome is uncertain | Retain recovery evidence for inspection, rather than deleting locks or guessing. |
+
+The **background service** does not automatically clone working repositories, push, stash, reset, clean, switch branches, or create semantic merges. It does not run repository hooks or project tests during fast-forward. Guardian-directed work is separate and follows your instructions.
+
+These checks are safeguards, **not a backup or an operating-system sandbox**. They cannot freeze an editor or another Git process, and an I/O failure can leave a partial update. Start with a disposable repository and read the [recovery guidance](docs/safety.md) before enabling real updates.
+
+## Get started
+
+### Requirements
+
+| Component | Needed for |
+| --- | --- |
+| Git at `/usr/bin/git` and a POSIX environment | The core workflow. Native Windows is not supported. |
+| Node.js **22.19+** recommended | The complete Pi workflow. The standalone git-sync CLI supports Node **20.10+**. |
+| GitHub CLI (`gh`) with your own saved login | Authenticated GitHub upstream access. Its executable path is configurable. |
+| SSH access with a verified peer host key | Peer sync and cross-computer status queries. |
+| Pi, Python **3.9+**, notify and durable packages | The optional interactive Guardian. |
+
+The included background-service installer uses **macOS LaunchAgent**. On Linux, use the foreground service or your own supervisor. This is a terminal-based developer tool, not a one-click desktop sync app.
+
+### 1. Build the public source
+
+For a new checkout:
 
 ```sh
+git clone https://github.com/roshameow/git-sync.git
+cd git-sync
 npm ci
 npm run build
-npm run typecheck
-npm test
 node dist/src/cli.js --help
 ```
 
-Use a source checkout for this full workflow, including docs/examples and
-`extensions/provenance.ts`; do not assume an older npm/core artifact contains
-these resources. No private extension package is required. Public integrations:
-[pi-agent-notify](https://github.com/roshameow/pi-agent-notify),
-[pi-subagent-durable](https://github.com/roshameow/pi-subagent-durable), and
-[pi-session-viewer](https://github.com/roshameow/pi-session-viewer).
+### 2. Discover first, without enabling updates
 
-## Safety in brief
+For a **new installation**, replace the directory below with an existing directory containing your Git projects:
 
-Receipt is not application; a wake request is not a completed sync. Only an
-explicitly selected existing checkout can be updated. Tracked/index changes,
-colliding untracked or ignored paths, divergence, wrong branch, or uncertain
-identity block application. Unrelated untracked/ignored files remain in place.
-No automatic clone, stash, reset, clean, push, branch switch, or semantic merge.
-Interrupted apply evidence must be preserved, not deleted to force a retry.
+```sh
+SOURCE="$PWD"
+NODE="$(node -p 'process.execPath')"
+CLI="$SOURCE/dist/src/cli.js"
 
-These instructions describe implemented interfaces, not a claim that anyone's
-production installation has been repointed or that your SSH/GitHub/Pi setup has
-been tested. The v0.1 core configuration is **not automatically compatible**.
-See [migration](docs/migration.md) before reusing old state. MIT licensed.
+"$NODE" "$CLI" init --host-id workstation --root /REPLACE_WITH_YOUR_PROJECT_DIRECTORY
+"$NODE" "$CLI" discover
+"$NODE" "$CLI" registry status
+```
 
-## Reusable publication skill
+These commands initialize local metadata and list projects. **They do not enable synchronization.** Here, “registry” means your local list of selected repositories, not another GitHub repository.
 
-`skills/github-public-release/` contains the portable GitHub publication skill: private
-docs/config stay out of Git, tracked files/history and packages are reviewed
-separately, and one public implementation must work without private dependencies.
-Pi discovers it through this package's `pi.skills` declaration; it can also be
-installed in a user skill directory independently. The skill is guidance, not
-authorization to publish or delete another repository.
+Already initialized? Do not start over. Add a directory with `discover --root /YOUR_ADDITIONAL_DIRECTORY`. Keep live configuration, credentials, and state outside the source checkout.
+
+### 3. Choose the setup you need
+
+First set the external configuration/state paths in [setup §1](docs/setup.md#1-build-and-choose-external-paths); its commands define `CONFIG_DIR` and `STATE_DIR`. If you ran `init` above, **do not repeat initialization** in the guide—continue with your chosen mode.
+
+| Next step | Guide |
+| --- | --- |
+| Receive GitHub updates on one computer | [Single-host setup](docs/setup.md#3a-start-with-one-host-and-github-no-peer) |
+| Synchronize an existing project on two computers | [Peer setup](docs/setup.md#3b-optional-two-host-direct-receipt) |
+| Keep sync running and connect a Pi session | [Daemon and Guardian setup](docs/guardian.md) |
+
+The guides cover executable paths, authentication, repository selection, and permissions. Fill the example configuration with **your own values**. `sync upstream enable` explicitly authorizes eligible automatic updates; discovery alone does not.
+
+### 4. Check progress
+
+After setup, use the same `NODE` and `CLI` values:
+
+```sh
+"$NODE" "$CLI" sync status     # Read recorded transfer / apply results
+"$NODE" "$CLI" sync wake       # Request a pass under the existing permissions
+"$NODE" "$CLI" daemon status   # Check the background service
+```
+
+Check the **apply result**, not only whether a commit was received. `up-to-date` means no update was needed; `fast-forwarded` means one was applied. `blocked-dirty` means local changes or a path collision need inspection—not necessarily a merge conflict. A wake request is not proof that sync has finished.
+
+## Documentation
+
+| Topic | Guide |
+| --- | --- |
+| Configuration, discovery, and selecting repositories | [Setup](docs/setup.md) |
+| Service installation, normal Pi session registration, and notifications | [Daemon & Guardian](docs/guardian.md) |
+| Reusable instructions for your Guardian session | [AGENTS.md template](docs/guardian-agent.md) |
+| Safety gates, status meanings, and interrupted operations | [Safety & recovery](docs/safety.md) |
+| Optional Pi observations and explicit commit attribution | [Provenance](docs/provenance.md) |
+| Moving from the older core-only release | [Migration](docs/migration.md) |
+| Keeping personal docs/config out of an open-source release | [GitHub publication skill](skills/github-public-release/SKILL.md) |
+
+The v0.1 core configuration is **not automatically compatible** with this workflow. Preserve its state and recovery evidence before migrating. Supported layout and transport restrictions—including unsupported checkout filters, submodules, shallow/sparse layouts, and SHA-256 repositories—are explained in the setup and safety guides.
+
+## Contributing and reporting issues
+
+Bug reports, documentation improvements, and focused changes are welcome. For a bug, include your OS, Node version, selected sync mode, reproduction steps, and **sanitized** transfer/apply states. Do not post credentials, private keys, session transcripts, or your full machine configuration.
+
+Before submitting a code change:
+
+```sh
+npm run typecheck
+npm test
+```
+
+Tests cover real temporary Git repositories, preservation of local work, configuration changes, interruption handling, and notification routing. Passing them does not establish that a particular user's SSH, GitHub, or Pi setup is ready.
+
+## License
+
+[MIT](LICENSE).
