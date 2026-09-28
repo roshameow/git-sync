@@ -1,13 +1,13 @@
 # git-sync
 
-**Routine Git updates in the background. A real Pi session for the hard parts.**
+**Background Git updates, with AI assistance when you need it.**
 
 **English** · [简体中文](README.zh-CN.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-22.19%2B_for_Pi-339933?logo=nodedotjs&logoColor=white)](#requirements)
 
-Keep existing Git projects up to date **between two computers**, or **from GitHub to one computer**. Straightforward updates can run automatically. When progress is blocked, an optional **Guardian**—an ordinary, interactive [Pi](https://github.com/earendil-works/pi) coding-assistant session—can investigate and coordinate the next step.
+Keep existing Git projects up to date **between two computers**, or **from GitHub to one computer**. Straightforward updates can run automatically. When progress is blocked, an optional **Guardian**—a [Pi](https://github.com/earendil-works/pi)-powered assistant you can talk to—helps you understand the problem and work through the next step.
 
 > git-sync moves **commits**: versions you have already saved in Git. It is not live folder mirroring, a backup system, or a way to copy unfinished edits between computers.
 
@@ -20,7 +20,7 @@ Keep existing Git projects up to date **between two computers**, or **from GitHu
 - **Keep human judgment available.** Open the Guardian session to see what it found, discuss a conflict, or decide how to preserve local changes.
 - **Keep normal work quiet.** Successful background sync does not need an AI model. The Guardian is notified about problems that need attention, not every successful commit.
 
-You choose the repositories, branches, computers, and permissions. No separate cloud coordination service or private control repository is required.
+You choose which projects and branches to manage, and when updates may be applied. Configuration and sync records stay on your own computers.
 
 ## Choose a mode
 
@@ -46,7 +46,7 @@ flowchart TB
         direction TB
         SA["Background sync service<br/>Receive commits · check · record status"]
         RA["Existing working repositories"]
-        GA["Guardian<br/>Ordinary interactive Pi session"]
+        GA["Guardian<br/>Interactive Pi assistant"]
         SA -->|"Eligible fast-forward"| RA
         SA -.->|"Issues that need attention"| GA
     end
@@ -89,21 +89,25 @@ The primary is the computer you choose to host the Guardian—not a required dev
 
 ## When sync needs help
 
-The Guardian is a normal Pi coding session, not a model hidden inside the daemon. You can interact with it directly and, optionally, open the same session in [pi-session-viewer](https://github.com/roshameow/pi-session-viewer).
+When an update stops, you should not have to piece together logs from two computers to understand why. **Guardian helps you investigate the problem and choose what to do next.**
 
-It uses the existing [pi-agent-notify](https://github.com/roshameow/pi-agent-notify) and [pi-subagent-durable](https://github.com/roshameow/pi-subagent-durable) integrations. There is no dedicated Guardian extension or special tool whitelist.
+- **Understand the blocker.** Check the project state and explain whether the issue is a connection problem, local edits, or conflicting commits.
+- **Work through conflicts.** Delegate a merge attempt to a separate task that prepares and checks a result in an isolated working copy, away from your ongoing work.
+- **Stay in control.** Review the findings, give instructions, and make any required decisions before changes are applied.
+
+You can return to the same conversation in Pi at any time, or use [pi-session-viewer](https://github.com/roshameow/pi-session-viewer) to access it through a desktop window.
 
 ```mermaid
 flowchart TB
     RECEIVE["New committed history"] --> CHECK["Background Git checks"]
     CHECK -->|"Already current, or safe update"| QUIET["Record result<br/>Normal success stays quiet"]
     CHECK -->|"Needs attention"| ISSUE["Record and deduplicate the issue"]
-    ISSUE -->|"Existing notification channel"| GUARD["Guardian checks current facts"]
+    ISSUE -->|"pi-agent-notify"| GUARD["Guardian checks current facts"]
 
-    subgraph ASSIST["Assistant-directed work · ordinary Pi tools"]
+    subgraph ASSIST["Investigate · review · recover"]
         GUARD --> KIND{"What is blocking progress?"}
         KIND -->|"Connection, settings, or local edits"| PLAN["Investigate and explain<br/>Preserve local work"]
-        KIND -->|"Histories have diverged"| RESOLVE["Separate resolver task<br/>Isolated working copy"]
+        KIND -->|"Histories have diverged"| RESOLVE["Task via pi-subagent-durable<br/>Isolated working copy"]
         RESOLVE --> TEST["Candidate result<br/>Review changes and run project checks"]
         TEST --> REVIEW["Guardian review<br/>User decision when required"]
         PLAN --> REVIEW
@@ -122,7 +126,7 @@ flowchart TB
     class GUARD,PLAN,RESOLVE,TEST,REVIEW,EVIDENCE assistant
 ```
 
-The lower section describes **work the Guardian can organize**, not an unattended semantic-merge engine. Simply starting the daemon does not launch a model or automatically resolve conflicts. Connect the Guardian separately; it acts within the user's instructions and obtains decisions when the existing permission is insufficient.
+[Connect a Guardian](docs/guardian.md) to enable this assistance. Routine updates work without it, but issues will need your attention until an assistant is connected. Guardian follows the permissions you give it and asks for a decision when the next action falls outside them.
 
 - Divergence and recovery-required states are raised promptly; repeated failures and selected persistent blockers are reported after repeated completed passes.
 - The optional bundled provenance bridge records Pi session observations. The Guardian can use reliable evidence to contact an original development session when appropriate. **An observed commit is not proof of authorship**; unknown or manual sources remain valid sync input.
@@ -151,15 +155,44 @@ These checks are safeguards, **not a backup or an operating-system sandbox**. Th
 
 ### Requirements
 
-| Component | Needed for |
-| --- | --- |
-| Git at `/usr/bin/git` and a POSIX environment | The core workflow. Native Windows is not supported. |
-| Node.js **22.19+** recommended | The complete Pi workflow. The standalone git-sync CLI supports Node **20.10+**. |
-| GitHub CLI (`gh`) with your own saved login | Authenticated GitHub upstream access. Its executable path is configurable. |
-| SSH access with a verified peer host key | Peer sync and cross-computer status queries. |
-| Pi, Python **3.9+**, notify and durable packages | The optional interactive Guardian. |
+**Install only what your chosen workflow needs.** Basic synchronization does not require Pi or a model account. To use the Guardian, install and configure the additional projects listed below.
 
-The included background-service installer uses **macOS LaunchAgent**. On Linux, use the foreground service or your own supervisor. This is a terminal-based developer tool, not a one-click desktop sync app.
+| Component | Required when | What you need to configure |
+| --- | --- | --- |
+| Git at `/usr/bin/git` and a POSIX environment | All modes | Existing local repositories and the branches you want to manage. Native Windows is not supported. |
+| Node.js | All modes | Node **20.10+** for the CLI; use **22.19+** for the complete Pi workflow. |
+| [GitHub CLI (`gh`)](https://github.com/cli/cli) | Authenticated GitHub upstream access | Your saved `gh` login and its absolute executable path in `workflow.json`. Private repositories require access to that account's selected repository. |
+| SSH at `/usr/bin/ssh` | Peer sync or cross-computer monitoring | Noninteractive key login, a verified Ed25519 host key, peer address/account, and the peer's Node/CLI paths. |
+| Python **3.9+** | Guardian notifications | Its absolute executable path in `workflow.json`. |
+
+### Projects used by the Guardian
+
+| Project | Required or optional? | Purpose and setup |
+| --- | --- | --- |
+| [Pi](https://github.com/earendil-works/pi) | Required for Guardian | Runs the assistant conversation. Install Pi, select a supported model/provider, and configure access as needed; model access and credentials are not included with git-sync. |
+| [pi-agent-notify](https://github.com/roshameow/pi-agent-notify) | Required for automatic Guardian notifications | Delivers issues to the selected Pi session. Load the package in Pi and configure git-sync with the installed `scripts/notify_agent.py` path. |
+| [pi-subagent-durable](https://github.com/roshameow/pi-subagent-durable) | Required by the documented Guardian registration flow | Supplies Pi runtime registration and the task delegation used for isolated resolver work. Load it in the Guardian's Pi installation. |
+| [RMUX](https://github.com/helvesec/rmux) | Required by the current interactive Guardian registration flow | Provides the existing terminal/pane target passed to `guardian register --rmux-target`. Start the Guardian in a real RMUX pane; the standalone durable package's subprocess fallback does not supply this target. |
+| [pi-session-viewer](https://github.com/roshameow/pi-session-viewer) | Optional | A desktop interface for browsing and opening the session. You can use the Guardian's terminal without it. |
+| Bundled [provenance bridge](docs/provenance.md), `extensions/provenance.ts` | Optional | Records observations from developer Pi sessions for source investigation. Enable it in those sessions if you want that evidence; it is not needed for basic sync. |
+
+Use the [Guardian setup guide](docs/guardian.md#install-the-public-pi-integrations) for installation and session registration. GitHub commits created by ChatGPT or another tool do **not** require that tool to be installed: they are ordinary Git input. AI assistance uses the model/provider you configure in Pi, with that provider's normal usage costs.
+
+### Configuration you provide
+
+The defaults below are **local configuration/state paths, outside this source checkout**. XDG settings or `GIT_SYNC_HOME` can change them; see [path setup](docs/setup.md#1-build-and-choose-external-paths).
+
+| File or setting | What it controls | How to set it up |
+| --- | --- | --- |
+| `~/.config/git-sync/config.json` | Directories to discover and directory exclusions | Created by `init`; add roots with `discover --root`. |
+| `~/.config/git-sync/workflow.json` | Guardian primary host, optional peer connection, and local `gh` / Python executables | Fill a [single-host](examples/workflow.single-host.example.json) or [peer](examples/workflow.example.json) example with your own values. |
+| `~/.local/state/git-sync/direct-sync.json` | Peer-mode repositories, local/peer paths, branch, polling interval, and permission to fast-forward | Fill the [direct-sync example](examples/direct-sync.example.json) on each participating computer. Start with apply disabled if you only want to verify receipt. |
+| `~/.local/state/git-sync/upstream-sync.json` | GitHub-mode repositories, branches, interval, and apply permission | Created or updated by `sync upstream enable`; that command opts into eligible automatic updates. |
+| Guardian session and sender | Which running Pi session receives notifications | Start Pi, then use `guardian register` and `guardian configure` as described in the [guide](docs/guardian.md#start-and-register-the-existing-interactive-session). |
+
+Match host IDs across your configuration. In `workflow.json`, `peers.*.nodeExecutable` and `peers.*.cliEntrypoint` are paths **on the other computer**; `executables.githubCli` and `executables.python` are paths **on this computer**. Check your actual executable locations rather than assuming defaults. Keep configuration owner-private (`0600`) and never put credentials into the examples.
+
+Peer SSH does not inherit your SSH aliases, proxy settings, or `SSH_AUTH_SOCK`; follow the [peer connection requirements](docs/setup.md#3b-optional-two-host-direct-receipt). The included service installer uses **macOS LaunchAgent**. On Linux, run the foreground service or use your own supervisor. This is a terminal-based developer tool, not a one-click desktop sync app.
 
 ### 1. Build the public source
 

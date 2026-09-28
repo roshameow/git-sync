@@ -1,13 +1,13 @@
 # git-sync
 
-**日常 Git 更新交给后台，棘手问题交给你能随时打开的 Pi 会话。**
+**日常 Git 更新交给后台，需要时由 AI 协助处理。**
 
 [English](README.md) · **简体中文**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-22.19%2B_for_Pi-339933?logo=nodedotjs&logoColor=white)](#运行要求)
 
-让已有的 Git 项目在**两台电脑之间同步**，或让**一台电脑自动接收 GitHub 更新**。能够直接、安全推进的更新由后台完成；遇到阻塞时，可选的 **Guardian** 会调查问题、组织下一步操作。它就是一个普通、可交互的 [Pi](https://github.com/earendil-works/pi) 编码助手会话，不是藏在后台的黑盒机器人。
+让已有的 Git 项目在**两台电脑之间同步**，或让**一台电脑自动接收 GitHub 更新**。能够直接、安全推进的更新由后台完成；遇到阻塞时，可选的 **Guardian** 会调查问题、组织下一步操作。它基于 [Pi](https://github.com/earendil-works/pi)，你可以随时与它对话、查看结果并给出指示。
 
 > git-sync 同步的是 **commit（提交）**，也就是你已经通过 Git 保存的版本。它不是实时文件夹镜像、备份系统，也不会把尚未提交的修改复制到另一台电脑。
 
@@ -20,7 +20,7 @@
 - **遇到复杂情况，有一个能对话的助手。** 打开 Guardian 会话，就能查看调查结果、讨论冲突，或决定怎样保留本地改动。
 - **正常同步保持安静。** 成功的后台同步不需要调用模型。需要关注的问题才通知 Guardian，不会每来一个提交就让 AI 工作一次。
 
-仓库、分支、电脑和操作权限都由你选择。不需要额外搭建云端协调服务，也不需要另建一个私有控制仓库。
+由你选择管理哪些项目和分支，以及什么时候允许应用更新。配置和同步记录保存在你自己的电脑上。
 
 ## 选择适合你的模式
 
@@ -46,7 +46,7 @@ flowchart TB
         direction TB
         SA["后台同步服务<br/>接收提交 · 检查 · 记录状态"]
         RA["已有的项目工作目录"]
-        GA["Guardian<br/>普通、可交互的 Pi 会话"]
+        GA["Guardian<br/>可交互的 Pi 助手"]
         SA -->|"符合条件时快进更新"| RA
         SA -.->|"需要关注的问题"| GA
     end
@@ -89,21 +89,25 @@ flowchart TB
 
 ## 同步遇到问题时，谁来处理？
 
-Guardian 是普通的 Pi 编码会话，不是 daemon 内置的模型。你可以直接与它对话，也可以通过可选的 [pi-session-viewer](https://github.com/roshameow/pi-session-viewer) 打开同一个会话。
+更新停下来时，你不必自己拼凑两台电脑的日志来寻找原因。**Guardian 会帮助你调查问题，并确定下一步怎么处理。**
 
-它复用已有的 [pi-agent-notify](https://github.com/roshameow/pi-agent-notify) 和 [pi-subagent-durable](https://github.com/roshameow/pi-subagent-durable)，不需要 Guardian 专属扩展或特殊工具白名单。
+- **弄清阻塞原因。** 检查项目状态，解释问题来自连接、本地修改，还是双方提交之间的冲突。
+- **协助解决冲突。** 将合并尝试交给独立任务，在隔离的工作目录中准备和检查结果，不直接动你正在进行的工作。
+- **保留你的决定权。** 你可以查看调查结果、给出指示，并在应用改动前作出必要的决定。
+
+你随时都能回到同一个 Pi 会话继续讨论，也可以通过 [pi-session-viewer](https://github.com/roshameow/pi-session-viewer) 在桌面窗口中打开它。
 
 ```mermaid
 flowchart TB
     RECEIVE["收到新的提交历史"] --> CHECK["后台执行 Git 检查"]
     CHECK -->|"已经对齐，或可以安全更新"| QUIET["记录结果<br/>正常成功保持安静"]
     CHECK -->|"需要关注"| ISSUE["记录问题并去重"]
-    ISSUE -->|"通过现有通知通道"| GUARD["Guardian 核对当前事实"]
+    ISSUE -->|"pi-agent-notify 发出通知"| GUARD["Guardian 核对当前事实"]
 
-    subgraph ASSIST["由助手组织的处理 · 使用普通 Pi 工具"]
+    subgraph ASSIST["调查问题 · 审查结果 · 恢复同步"]
         GUARD --> KIND{"是什么阻止了同步？"}
         KIND -->|"连接、配置或本地修改"| PLAN["调查并解释原因<br/>保留本地工作"]
-        KIND -->|"提交历史已经分叉"| RESOLVE["独立的 resolver 任务<br/>在隔离工作目录中处理"]
+        KIND -->|"提交历史已经分叉"| RESOLVE["通过 pi-subagent-durable 委派任务<br/>在隔离工作目录中处理"]
         RESOLVE --> TEST["形成候选结果<br/>审查改动并运行项目检查"]
         TEST --> REVIEW["Guardian 审查<br/>必要时由用户决定"]
         PLAN --> REVIEW
@@ -122,7 +126,7 @@ flowchart TB
     class GUARD,PLAN,RESOLVE,TEST,REVIEW,EVIDENCE assistant
 ```
 
-图的下半部分是 **Guardian 可以组织的工作流程**，不是一个无人值守的语义合并引擎。仅启动后台服务，不会自动启动模型或解决冲突。你需要单独接入 Guardian；它按照用户指令行动，已有权限不够时才提出需要你决定的事项。
+完成 [Guardian 配置](docs/guardian.md)后，即可使用这些协助功能。没有接入助手时，日常更新仍可运行，但遇到问题需要你自行处理。Guardian 按照你授予的权限行动，下一步超出这些权限时，会请你作出决定。
 
 - 分叉、需要恢复等状态会及时通知；重复失败和部分持续阻塞，在重复的已完成轮次后通知，避免正常编辑导致频繁打扰。
 - 可选的来源观察桥接已随项目提供。Guardian 可以根据可靠证据，按需联系产生相关改动的原开发会话。**观察到提交变化，并不等于证明作者身份**；来源未知或手工提交也照常参与同步。
@@ -151,15 +155,44 @@ flowchart TB
 
 ### 运行要求
 
-| 组件 | 用途 |
-| --- | --- |
-| `/usr/bin/git` 与 POSIX 环境 | 基础工作流；不支持原生 Windows。 |
-| 推荐 Node.js **22.19+** | 运行完整 Pi 工作流；独立 git-sync CLI 支持 Node **20.10+**。 |
-| GitHub CLI（`gh`）及你自己的已保存登录 | 需要认证的 GitHub 上游访问；可配置其程序路径。 |
-| SSH 访问与已核验的对端主机密钥 | 双机同步与跨机状态查询。 |
-| Pi、Python **3.9+**、notify 和 durable 包 | 可选的交互式 Guardian。 |
+**按需要安装，不必一次装齐所有组件。** 基础同步不依赖 Pi 或模型账号；使用 Guardian 时，再安装并配置下面列出的配套项目。
 
-内置的后台服务安装器使用 **macOS LaunchAgent**。Linux 用户可运行前台服务，或配置自己的进程管理器。这是需要终端配置的开发者工具，不是一键安装的桌面同步软件。
+| 组件 | 什么时候需要 | 需要配置什么 |
+| --- | --- | --- |
+| `/usr/bin/git` 与 POSIX 环境 | 所有模式 | 已有的本地仓库和要管理的分支；不支持原生 Windows。 |
+| Node.js | 所有模式 | CLI 需要 **20.10+**；完整 Pi 工作流请使用 **22.19+**。 |
+| [GitHub CLI（`gh`）](https://github.com/cli/cli) | 需要认证的 GitHub 上游访问 | 保存你自己的 `gh` 登录，并在 `workflow.json` 中指定其绝对路径。访问私有仓库时，账号必须具备对应仓库的权限。 |
+| `/usr/bin/ssh` | 双机同步或跨机监控 | 无需交互的密钥登录、已核验的 Ed25519 主机密钥、对端地址与账号，以及对端 Node/CLI 路径。 |
+| Python **3.9+** | Guardian 通知 | 在 `workflow.json` 中指定其绝对路径。 |
+
+### Guardian 使用哪些项目？
+
+| 项目 | 必需还是可选 | 用途与配置 |
+| --- | --- | --- |
+| [Pi](https://github.com/earendil-works/pi) | 使用 Guardian 时必需 | 运行助手会话。安装 Pi、选择受支持的模型 / 服务商，并按需要配置访问方式；git-sync 不附带模型访问权限或凭据。 |
+| [pi-agent-notify](https://github.com/roshameow/pi-agent-notify) | 自动通知 Guardian 时必需 | 将问题投递到指定 Pi 会话。在 Pi 中加载这个包，并向 git-sync 配置已安装的 `scripts/notify_agent.py` 路径。 |
+| [pi-subagent-durable](https://github.com/roshameow/pi-subagent-durable) | 当前文档所述的 Guardian 登记流程需要 | 提供 Pi 运行登记信息，以及隔离解决任务所用的委派能力。需在 Guardian 使用的 Pi 环境中加载。 |
+| [RMUX](https://github.com/helvesec/rmux) | 当前交互式 Guardian 登记流程需要 | 提供 `guardian register --rmux-target` 所需的已有终端目标。应在真实的 RMUX 窗格中启动 Guardian；durable 单独提供的普通子进程模式不会生成这个目标。 |
+| [pi-session-viewer](https://github.com/roshameow/pi-session-viewer) | 可选 | 用桌面界面浏览和打开会话。不安装它，也可以使用 Guardian 的终端会话。 |
+| 随项目提供的[来源观察桥接](docs/provenance.md)：`extensions/provenance.ts` | 可选 | 从开发者的 Pi 会话记录观察信息，供调查提交来源时参考。需要这些证据时，在相应开发会话中启用；基础同步不依赖它。 |
+
+安装和会话登记步骤见 [Guardian 配置指南](docs/guardian.md#install-the-public-pi-integrations)。接收 ChatGPT 或其他工具产生的 GitHub 提交，**不要求安装对应工具**；它们都是普通 Git 输入。AI 协助使用你在 Pi 中配置的模型和服务商，并按该服务商的规则产生使用费用。
+
+### 需要准备哪些配置？
+
+下面是默认的**本机配置 / 状态路径，均位于源码仓库之外**。XDG 设置或 `GIT_SYNC_HOME` 可以改变这些位置，详见[目录配置](docs/setup.md#1-build-and-choose-external-paths)。
+
+| 文件或设置 | 控制什么 | 怎样配置 |
+| --- | --- | --- |
+| `~/.config/git-sync/config.json` | 要发现仓库的目录及排除项 | 由 `init` 创建，用 `discover --root` 增量添加目录。 |
+| `~/.config/git-sync/workflow.json` | Guardian 主节点、可选的对端连接、本机 `gh` / Python 路径 | 根据[单机示例](examples/workflow.single-host.example.json)或[双机示例](examples/workflow.example.json)，填写自己的值。 |
+| `~/.local/state/git-sync/direct-sync.json` | 双机模式的仓库、本机 / 对端路径、分支、轮询间隔、快进许可 | 在参与同步的每台电脑上填写[双机同步示例](examples/direct-sync.example.json)。如果只想先验证接收，可先关闭应用权限。 |
+| `~/.local/state/git-sync/upstream-sync.json` | GitHub 模式的仓库、分支、间隔、应用权限 | 由 `sync upstream enable` 创建或更新；该命令会授权符合条件的自动更新。 |
+| Guardian 会话与通知发送器 | 哪个正在运行的 Pi 会话接收问题通知 | 先启动 Pi，再按[指南](docs/guardian.md#start-and-register-the-existing-interactive-session)执行 `guardian register`、`guardian configure`。 |
+
+各处的主机标识应保持一致。`workflow.json` 中的 `peers.*.nodeExecutable`、`peers.*.cliEntrypoint` 是**对端电脑**上的路径；`executables.githubCli`、`executables.python` 是**本机**路径。请核对实际安装位置，不要直接假定默认路径可用。配置文件应仅本人可读写（`0600`），不要把凭据写进示例。
+
+对端 SSH 不继承你的 SSH 别名、代理设置或 `SSH_AUTH_SOCK`，请遵循[双机连接要求](docs/setup.md#3b-optional-two-host-direct-receipt)。内置服务安装器使用 **macOS LaunchAgent**；Linux 用户可运行前台服务，或使用自己的进程管理器。这是需要终端配置的开发者工具，不是一键安装的桌面同步软件。
 
 ### 1. 获取并构建公开源码
 

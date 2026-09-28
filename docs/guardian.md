@@ -85,8 +85,8 @@ service installer or launchd compatibility is promised.
 
 ## Install the public Pi integrations
 
-Use a current normal Pi CLI with your own model/provider configuration; no
-custom SDK runtime, model selection, or special tool whitelist is required.
+Install a current Pi CLI and configure access to your chosen model/provider.
+The Guardian uses that session's settings and tools.
 If Pi is not installed, with Node 22.19+:
 
 ```sh
@@ -99,11 +99,15 @@ dependency READMEs for supported versions:
 - [pi-agent-notify](https://github.com/roshameow/pi-agent-notify): exact-session events.
 - [pi-subagent-durable](https://github.com/roshameow/pi-subagent-durable): normal
   runtime registration and optional isolated resolver workers.
+- [RMUX](https://github.com/helvesec/rmux): a terminal/pane environment for the
+  current `guardian register --rmux-target` flow. Install it using its upstream
+  instructions and start the Guardian in a real pane. Durable's standalone
+  subprocess fallback is useful for other tasks but does not supply this target.
 - [pi-session-viewer](https://github.com/roshameow/pi-session-viewer): optional
-  Desktop UI for the same ordinary Pi sessions, not a second Guardian writer.
+  desktop UI for browsing and opening the Guardian session.
 
-For a new installation, these commands place the public notify package at a
-known absolute location, so its sender is not borrowed from a private checkout:
+For a new installation, these commands install notify at a known location.
+You will use its sender path when configuring notification routing:
 
 ```sh
 NOTIFY_ROOT="$HOME/.local/share/pi-packages/pi-agent-notify"
